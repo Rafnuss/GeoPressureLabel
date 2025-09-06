@@ -1,0 +1,18 @@
+_target_: src.data.label_datamodule.LabelDataModule
+
+data_dir: ${paths.data_dir}
+
+act: True
+act_res: "5min"
+window: ${eval:24*60/5} # multiply by act_res to get hours of context
+
+batch_size: 128
+num_workers: 11
+pin_memory: True
+
+# Subsampling settings (see DataModule)
+split_samples:
+  train: 10000
+  val: 2000
+  test: 2000
+flight_ratio: 0.4

@@ -3,11 +3,17 @@ from typing import Any, Dict, Tuple
 import torch
 from lightning import LightningModule
 from torchmetrics import MaxMetric, MeanMetric
-from torchmetrics.classification.accuracy import Accuracy
+from torchmetrics.classification import (
+    BinaryAccuracy,
+    BinaryF1Score,
+    BinaryAUROC,
+    BinaryPrecision,
+    BinaryRecall,
+)
 
 
-class MNISTLitModule(LightningModule):
-    """Example of a `LightningModule` for MNIST classification.
+class LabelLitModule(LightningModule):
+    """Example of a `LightningModule` for label classification.
 
     A `LightningModule` implements 8 key methods:
 
@@ -46,7 +52,7 @@ class MNISTLitModule(LightningModule):
         scheduler: torch.optim.lr_scheduler,
         compile: bool,
     ) -> None:
-        """Initialize a `MNISTLitModule`.
+        """Initialize a `LabelLitModule`.
 
         :param net: The model to train.
         :param optimizer: The optimizer to use for training.
@@ -56,17 +62,29 @@ class MNISTLitModule(LightningModule):
 
         # this line allows to access init params with 'self.hparams' attribute
         # also ensures init params will be stored in ckpt
-        self.save_hyperparameters(logger=False)
+        self.save_hyperparameters(ignore=["net"], logger=False)
 
         self.net = net
 
         # loss function
-        self.criterion = torch.nn.CrossEntropyLoss()
+        self.criterion = torch.nn.BCEWithLogitsLoss()
 
-        # metric objects for calculating and averaging accuracy across batches
-        self.train_acc = Accuracy(task="multiclass", num_classes=10)
-        self.val_acc = Accuracy(task="multiclass", num_classes=10)
-        self.test_acc = Accuracy(task="multiclass", num_classes=10)
+        # metric objects for calculating and averaging binary metrics across batches
+        self.train_acc = BinaryAccuracy()
+        self.val_acc = BinaryAccuracy()
+        self.test_acc = BinaryAccuracy()
+        self.train_f1 = BinaryF1Score()
+        self.val_f1 = BinaryF1Score()
+        self.test_f1 = BinaryF1Score()
+        self.train_auroc = BinaryAUROC()
+        self.val_auroc = BinaryAUROC()
+        self.test_auroc = BinaryAUROC()
+        self.train_precision = BinaryPrecision()
+        self.val_precision = BinaryPrecision()
+        self.test_precision = BinaryPrecision()
+        self.train_recall = BinaryRecall()
+        self.val_recall = BinaryRecall()
+        self.test_recall = BinaryRecall()
 
         # for averaging loss across batches
         self.train_loss = MeanMetric()
@@ -97,17 +115,17 @@ class MNISTLitModule(LightningModule):
     ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         """Perform a single model step on a batch of data.
 
-        :param batch: A batch of data (a tuple) containing the input tensor of images and target labels.
-
+        :param batch: A batch of data (a tuple) containing the input tensor and target labels.
         :return: A tuple containing (in order):
             - A tensor of losses.
-            - A tensor of predictions.
+            - A tensor of predictions (0 or 1).
             - A tensor of target labels.
         """
         x, y = batch
         logits = self.forward(x)
         loss = self.criterion(logits, y)
-        preds = torch.argmax(logits, dim=1)
+        probs = torch.sigmoid(logits)
+        preds = (probs > 0.5).float()
         return loss, preds, y
 
     def training_step(
@@ -125,8 +143,52 @@ class MNISTLitModule(LightningModule):
         # update and log metrics
         self.train_loss(loss)
         self.train_acc(preds, targets)
-        self.log("train/loss", self.train_loss, on_step=False, on_epoch=True, prog_bar=True)
-        self.log("train/acc", self.train_acc, on_step=False, on_epoch=True, prog_bar=True)
+        self.train_f1(preds, targets)
+        self.train_auroc(preds, targets)
+        self.train_precision(preds, targets)
+        self.train_recall(preds, targets)
+        self.log(
+            "train/loss",
+            self.train_loss,
+            on_step=False,
+            on_epoch=True,
+            prog_bar=True,
+        )
+        self.log(
+            "train/acc",
+            self.train_acc,
+            on_step=False,
+            on_epoch=True,
+            prog_bar=True,
+        )
+        self.log(
+            "train/f1",
+            self.train_f1,
+            on_step=False,
+            on_epoch=True,
+            prog_bar=True,
+        )
+        self.log(
+            "train/auroc",
+            self.train_auroc,
+            on_step=False,
+            on_epoch=True,
+            prog_bar=True,
+        )
+        self.log(
+            "train/precision",
+            self.train_precision,
+            on_step=False,
+            on_epoch=True,
+            prog_bar=True,
+        )
+        self.log(
+            "train/recall",
+            self.train_recall,
+            on_step=False,
+            on_epoch=True,
+            prog_bar=True,
+        )
 
         # return loss or backpropagation will fail
         return loss
@@ -135,7 +197,9 @@ class MNISTLitModule(LightningModule):
         "Lightning hook that is called when a training epoch ends."
         pass
 
-    def validation_step(self, batch: Tuple[torch.Tensor, torch.Tensor], batch_idx: int) -> None:
+    def validation_step(
+        self, batch: Tuple[torch.Tensor, torch.Tensor], batch_idx: int
+    ) -> None:
         """Perform a single validation step on a batch of data from the validation set.
 
         :param batch: A batch of data (a tuple) containing the input tensor of images and target
@@ -147,8 +211,52 @@ class MNISTLitModule(LightningModule):
         # update and log metrics
         self.val_loss(loss)
         self.val_acc(preds, targets)
-        self.log("val/loss", self.val_loss, on_step=False, on_epoch=True, prog_bar=True)
-        self.log("val/acc", self.val_acc, on_step=False, on_epoch=True, prog_bar=True)
+        self.val_f1(preds, targets)
+        self.val_auroc(preds, targets)
+        self.val_precision(preds, targets)
+        self.val_recall(preds, targets)
+        self.log(
+            "val/loss",
+            self.val_loss,
+            on_step=False,
+            on_epoch=True,
+            prog_bar=True,
+        )
+        self.log(
+            "val/acc",
+            self.val_acc,
+            on_step=False,
+            on_epoch=True,
+            prog_bar=True,
+        )
+        self.log(
+            "val/f1",
+            self.val_f1,
+            on_step=False,
+            on_epoch=True,
+            prog_bar=True,
+        )
+        self.log(
+            "val/auroc",
+            self.val_auroc,
+            on_step=False,
+            on_epoch=True,
+            prog_bar=True,
+        )
+        self.log(
+            "val/precision",
+            self.val_precision,
+            on_step=False,
+            on_epoch=True,
+            prog_bar=True,
+        )
+        self.log(
+            "val/recall",
+            self.val_recall,
+            on_step=False,
+            on_epoch=True,
+            prog_bar=True,
+        )
 
     def on_validation_epoch_end(self) -> None:
         "Lightning hook that is called when a validation epoch ends."
@@ -156,9 +264,16 @@ class MNISTLitModule(LightningModule):
         self.val_acc_best(acc)  # update best so far val acc
         # log `val_acc_best` as a value through `.compute()` method, instead of as a metric object
         # otherwise metric would be reset by lightning after each epoch
-        self.log("val/acc_best", self.val_acc_best.compute(), sync_dist=True, prog_bar=True)
+        self.log(
+            "val/acc_best",
+            self.val_acc_best.compute(),
+            sync_dist=True,
+            prog_bar=True,
+        )
 
-    def test_step(self, batch: Tuple[torch.Tensor, torch.Tensor], batch_idx: int) -> None:
+    def test_step(
+        self, batch: Tuple[torch.Tensor, torch.Tensor], batch_idx: int
+    ) -> None:
         """Perform a single test step on a batch of data from the test set.
 
         :param batch: A batch of data (a tuple) containing the input tensor of images and target
@@ -168,10 +283,55 @@ class MNISTLitModule(LightningModule):
         loss, preds, targets = self.model_step(batch)
 
         # update and log metrics
+
         self.test_loss(loss)
         self.test_acc(preds, targets)
-        self.log("test/loss", self.test_loss, on_step=False, on_epoch=True, prog_bar=True)
-        self.log("test/acc", self.test_acc, on_step=False, on_epoch=True, prog_bar=True)
+        self.test_f1(preds, targets)
+        self.test_auroc(preds, targets)
+        self.test_precision(preds, targets)
+        self.test_recall(preds, targets)
+        self.log(
+            "test/loss",
+            self.test_loss,
+            on_step=False,
+            on_epoch=True,
+            prog_bar=True,
+        )
+        self.log(
+            "test/acc",
+            self.test_acc,
+            on_step=False,
+            on_epoch=True,
+            prog_bar=True,
+        )
+        self.log(
+            "test/f1",
+            self.test_f1,
+            on_step=False,
+            on_epoch=True,
+            prog_bar=True,
+        )
+        self.log(
+            "test/auroc",
+            self.test_auroc,
+            on_step=False,
+            on_epoch=True,
+            prog_bar=True,
+        )
+        self.log(
+            "test/precision",
+            self.test_precision,
+            on_step=False,
+            on_epoch=True,
+            prog_bar=True,
+        )
+        self.log(
+            "test/recall",
+            self.test_recall,
+            on_step=False,
+            on_epoch=True,
+            prog_bar=True,
+        )
 
     def on_test_epoch_end(self) -> None:
         """Lightning hook that is called when a test epoch ends."""
@@ -214,4 +374,4 @@ class MNISTLitModule(LightningModule):
 
 
 if __name__ == "__main__":
-    _ = MNISTLitModule(None, None, None, None)
+    _ = LabelLitModule(None, None, None, None)
